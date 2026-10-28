@@ -29,6 +29,25 @@ describe('AvatarController', () => {
   });
 
   describe('setState', () => {
+    it('preserves the original three-minute idle reset after an emotional response', () => {
+      vi.useFakeTimers();
+      try {
+        controller.onNewResponse('positive response', AvatarState.HAPPY);
+        vi.advanceTimersByTime(179999); expect(controller.getState()).toBe(AvatarState.HAPPY);
+        vi.advanceTimersByTime(1); expect([AvatarState.IDLE, AvatarState.IDLE2, AvatarState.IDLE3]).toContain(controller.getState());
+      } finally { vi.useRealTimers(); }
+    });
+    it('keeps the tutorial expression while remembering new response state and custom images', () => {
+      controller.setState(AvatarState.SAD);
+      controller.setPresentationState(AvatarState.HAPPY);
+      controller.onNewResponse('New answer', AvatarState.THINKING);
+      expect(controller.getState()).toBe(AvatarState.THINKING);
+      expect(mockOverlay.setImage).toHaveBeenLastCalledWith(expect.stringContaining('happy.svg'));
+      controller.setCustomAvatars({ [AvatarState.HAPPY]: 'data:image/png;base64,happy', [AvatarState.THINKING]: 'data:image/png;base64,thinking' });
+      expect(mockOverlay.setImage).toHaveBeenLastCalledWith('data:image/png;base64,happy');
+      controller.setPresentationState(null);
+      expect(mockOverlay.setImage).toHaveBeenLastCalledWith('data:image/png;base64,thinking');
+    });
     it('should set state and update overlay image', () => {
       controller.setState(AvatarState.THINKING);
       expect(controller.getState()).toBe(AvatarState.THINKING);
@@ -36,9 +55,9 @@ describe('AvatarController', () => {
     });
 
     it('should not update if state is the same', () => {
-      controller.setState(AvatarState.IDLE);
+      controller.setState(AvatarState.HAPPY);
       const callCount = (mockOverlay.setImage as ReturnType<typeof vi.fn>).mock.calls.length;
-      controller.setState(AvatarState.IDLE);
+      controller.setState(AvatarState.HAPPY);
       expect((mockOverlay.setImage as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callCount);
     });
 
@@ -85,10 +104,10 @@ describe('AvatarController', () => {
   });
 
   describe('setIdle', () => {
-    it('should set idle state', () => {
+    it('should select an idle variant', () => {
       controller.setState(AvatarState.HAPPY);
       controller.setIdle();
-      expect(controller.getState()).toBe(AvatarState.IDLE);
+      expect([AvatarState.IDLE, AvatarState.IDLE2, AvatarState.IDLE3]).toContain(controller.getState());
     });
   });
 });

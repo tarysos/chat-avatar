@@ -2,17 +2,35 @@
  * Application constants
  */
 
-import type { ExtensionConfig } from './types';
+import type { ExtensionConfig, PageFeatureSettings } from './types';
 import { AvatarState, LlmProvider, TargetSite } from './types';
 
 /**
  * Default configuration
  */
+export const DEFAULT_PAGE_FEATURES: PageFeatureSettings = {
+  questionOutline: true,
+  conversationExport: true,
+  answerExport: true,
+  historyDelete: true,
+};
+
+/** Older saved settings keep all existing page tools enabled. */
+export function resolvePageFeatures(settings?: Partial<PageFeatureSettings>): PageFeatureSettings {
+  return {
+    questionOutline: settings?.questionOutline !== false,
+    conversationExport: settings?.conversationExport !== false,
+    answerExport: settings?.answerExport !== false,
+    historyDelete: settings?.historyDelete !== false,
+  };
+}
+
 export const DEFAULT_CONFIG: ExtensionConfig = {
   enabled: true,
   llmProvider: LlmProvider.NONE,
   avatarStyle: 'default',
   targetSites: [TargetSite.CHATGPT, TargetSite.GEMINI],
+  pageFeatures: { ...DEFAULT_PAGE_FEATURES },
 };
 
 /**
@@ -50,6 +68,18 @@ export const SPEAKING_DURATION_PER_CHAR_MS = 50;
  */
 export const STORAGE_KEY_CONFIG = 'extensionConfig';
 export const STORAGE_KEY_CUSTOM_AVATARS = 'customAvatars';
+export const STORAGE_KEY_DISPLAY = 'avatarDisplay';
+export const STORAGE_KEY_ONBOARDING = 'avatarOnboardingV1';
+export const avatarPositionKey = (site: TargetSite): string => `avatarPosition:${site}`;
+export const DEFAULT_AVATAR_SIZE = 128;
+export const MIN_AVATAR_SIZE = 64;
+export const MAX_AVATAR_SIZE = 320;
+
+export function clampAvatarSize(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(MIN_AVATAR_SIZE, Math.min(MAX_AVATAR_SIZE, Math.round(value)))
+    : DEFAULT_AVATAR_SIZE;
+}
 
 /**
  * Site-specific selectors

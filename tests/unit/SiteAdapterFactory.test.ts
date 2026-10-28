@@ -17,7 +17,8 @@ describe('SiteAdapterFactory', () => {
     it('should create ChatGPT adapter', () => {
       const adapter = factory.create(TargetSite.CHATGPT);
       expect(adapter).toBeDefined();
-      expect(adapter.getResponseSelector()).toBe('[data-message-author-role="assistant"]');
+      expect(adapter.getResponseSelector()).toContain('[data-message-author-role="assistant"]');
+      expect(adapter.getResponseSelector()).toContain('article[data-turn="assistant"]');
     });
 
     it('should create Gemini adapter', () => {

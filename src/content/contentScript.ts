@@ -6,11 +6,13 @@
 import { AvatarOverlay } from '@/avatar/AvatarOverlay';
 import { AvatarController } from '@/avatar/AvatarController';
 import { ResponseWatcher } from './ResponseWatcher';
+import { PageActions } from './PageActions';
+import { OnboardingTour } from './OnboardingTour';
 import { SiteAdapterFactory } from '@/adapters/SiteAdapterFactory';
 import { detectSite } from '@/common/utils';
 import { TargetSite, MessageType, AvatarState } from '@/common/types';
-import type { AiResponse, ExtensionMessage, EmotionAnalysis } from '@/common/types';
-import { STORAGE_KEY_CUSTOM_AVATARS } from '@/common/constants';
+import type { AiResponse, ExtensionMessage, EmotionAnalysis, ExtensionConfig } from '@/common/types';
+import { STORAGE_KEY_CUSTOM_AVATARS, STORAGE_KEY_CONFIG, STORAGE_KEY_DISPLAY, clampAvatarSize, avatarPositionKey } from '@/common/constants';
 
 class ContentScriptApp {
   private overlay: AvatarOverlay | null = null;
@@ -18,6 +20,9 @@ class ContentScriptApp {
   private watcher: ResponseWatcher | null = null;
   private siteAdapterFactory: SiteAdapterFactory;
   private currentSite: string | null = null;
+  private enabled = true;
+  private pageActions: PageActions | null = null;
+  private onboarding: OnboardingTour | null = null;
 
   constructor() {
     this.siteAdapterFactory = new SiteAdapterFactory();
@@ -34,11 +39,16 @@ class ContentScriptApp {
 
     try {
       // Initialize components
-      this.overlay = new AvatarOverlay();
+      this.overlay = new AvatarOverlay(this.currentSite as TargetSite);
       this.controller = new AvatarController(this.overlay);
+      this.onboarding = new OnboardingTour(this.currentSite as TargetSite, () => {
+        chrome.runtime.sendMessage({ type: MessageType.OPEN_OPTIONS, payload: null });
+      }, state => this.controller?.setPresentationState(state));
 
       // Load custom avatars from config
       await this.loadCustomAvatars();
+      await this.loadDisplaySettings();
+      chrome.storage.onChanged.addListener(this.handleStorageChange);
 
       // Enable dragging
       this.overlay.enableDragging();
@@ -53,6 +63,7 @@ class ContentScriptApp {
       // Start the watcher immediately
       // It will handle marking existing responses internally
       this.watcher.start();
+      if (this.enabled) this.onboarding.maybeStart();
 
       console.log('AI Avatar Overlay: Initialized successfully');
 
@@ -69,17 +80,60 @@ class ContentScriptApp {
       const result = await chrome.storage.local.get(STORAGE_KEY_CUSTOM_AVATARS);
       const customAvatars = result[STORAGE_KEY_CUSTOM_AVATARS];
 
-      if (customAvatars && this.controller) {
-        this.controller.setCustomAvatars(customAvatars);
-        console.log('✅ Custom avatars loaded:', Object.keys(customAvatars).length, 'states');
+      if (this.controller) {
+        this.controller.setCustomAvatars(customAvatars || {});
+        this.onboarding?.setImages(customAvatars || {});
+        console.log('✅ Custom avatars loaded:', Object.keys(customAvatars || {}).length, 'states');
       }
     } catch (error) {
       console.error('Failed to load custom avatars:', error);
     }
   }
 
+  private async loadDisplaySettings(): Promise<void> {
+    const [local, sync]: [Record<string, unknown>, Record<string, unknown>] = await Promise.all([
+      chrome.storage.local.get([STORAGE_KEY_DISPLAY, avatarPositionKey(this.currentSite as TargetSite)]).catch(error => {
+        console.error('Failed to load avatar display settings:', error); return {};
+      }),
+      chrome.storage.sync.get(STORAGE_KEY_CONFIG).catch(error => {
+        console.error('Failed to load page feature settings:', error); return {};
+      }),
+    ]);
+    const display = local[STORAGE_KEY_DISPLAY] as { size?: unknown } | undefined;
+    const config = sync[STORAGE_KEY_CONFIG] as Partial<ExtensionConfig> | undefined;
+    this.overlay?.setSize(clampAvatarSize(display?.size));
+    this.overlay?.restorePosition(local[avatarPositionKey(this.currentSite as TargetSite)]);
+    this.enabled = config?.enabled !== false;
+    const pageFeatures = config?.pageFeatures;
+    if (this.enabled) this.overlay?.show(); else this.overlay?.hide();
+    // Optional page tools must not prevent the original avatar/watcher from starting.
+    try {
+      this.onboarding?.configure(pageFeatures);
+      if (this.pageActions) this.pageActions.setFeatures(pageFeatures);
+      else this.pageActions = new PageActions(this.currentSite as TargetSite, pageFeatures);
+    } catch (error) { console.error('Failed to initialize page tools:', error); }
+  }
+
+  private handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
+    if (area === 'local' && changes[STORAGE_KEY_CUSTOM_AVATARS]) {
+      this.controller?.setCustomAvatars(changes[STORAGE_KEY_CUSTOM_AVATARS].newValue || {});
+      this.onboarding?.setImages(changes[STORAGE_KEY_CUSTOM_AVATARS].newValue || {});
+    }
+    if (area === 'local' && changes[STORAGE_KEY_DISPLAY]) {
+      this.overlay?.setSize(clampAvatarSize(changes[STORAGE_KEY_DISPLAY].newValue?.size));
+    }
+    const positionKey = avatarPositionKey(this.currentSite as TargetSite);
+    if (area === 'local' && changes[positionKey]) this.overlay?.restorePosition(changes[positionKey].newValue);
+    if (area === 'sync' && changes[STORAGE_KEY_CONFIG]) {
+      this.enabled = changes[STORAGE_KEY_CONFIG].newValue?.enabled !== false;
+      this.pageActions?.setFeatures(changes[STORAGE_KEY_CONFIG].newValue?.pageFeatures);
+      this.onboarding?.configure(changes[STORAGE_KEY_CONFIG].newValue?.pageFeatures);
+      if (this.enabled) this.overlay?.show(); else this.overlay?.hide();
+    }
+  };
+
   private handleAiResponse(response: AiResponse): void {
-    if (!this.controller) return;
+    if (!this.controller || !this.enabled) return;
 
     console.log('📨 Handling AI response in contentScript');
 
@@ -147,12 +201,16 @@ class ContentScriptApp {
     // Reload custom avatars when config is updated
     console.log('Configuration updated, reloading custom avatars...');
     await this.loadCustomAvatars();
+    await this.loadDisplaySettings();
   }
 
   public destroy(): void {
+    chrome.storage.onChanged.removeListener(this.handleStorageChange);
     this.watcher?.destroy();
     this.controller?.destroy();
     this.overlay?.destroy();
+    this.pageActions?.destroy();
+    this.onboarding?.destroy();
   }
 }
 

@@ -59,6 +59,13 @@ export interface CustomAvatarImages {
  * Configuration stored in Chrome storage (sync)
  * Note: Custom avatars are stored separately in local storage due to size limits
  */
+export interface PageFeatureSettings {
+  questionOutline: boolean;
+  conversationExport: boolean;
+  answerExport: boolean;
+  historyDelete: boolean;
+}
+
 export interface ExtensionConfig {
   enabled: boolean;
   llmProvider: LlmProvider;
@@ -66,6 +73,7 @@ export interface ExtensionConfig {
   modelName?: string;
   avatarStyle: string;
   targetSites: TargetSite[];
+  pageFeatures?: Partial<PageFeatureSettings>;
 }
 
 /**
@@ -102,6 +110,8 @@ export enum MessageType {
   EMOTION_RESULT = 'EMOTION_RESULT',
   CONFIG_UPDATED = 'CONFIG_UPDATED',
   GET_CONFIG = 'GET_CONFIG',
+  OPEN_OPTIONS = 'OPEN_OPTIONS',
+  CLAIM_ONBOARDING = 'CLAIM_ONBOARDING',
 }
 
 /**

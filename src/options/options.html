@@ -258,12 +258,20 @@
     .btn-reset-avatar:hover {
       background: #e64a19;
     }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .pack-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+    input[type="range"] { width: 100%; accent-color: #287c3d; }
+    output { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>AI Avatar Overlay Settings</h1>
     <p class="subtitle">Configure your animated avatar assistant</p>
+    <div class="section" lang="zh-Hant">
+      <button type="button" class="btn-secondary" id="showTourBtn">使用教學</button>
+      <p class="help-text">讓原本角色用表情與對話泡泡介紹功能，可隨時略過或重看。</p>
+    </div>
 
     <div class="section">
       <h2 class="section-title">General Settings</h2>
@@ -273,6 +281,12 @@
           <input type="checkbox" id="enabled" checked>
           <label for="enabled">Enable Avatar Overlay</label>
         </div>
+      </div>
+
+      <div class="form-group" lang="zh-Hant">
+        <label for="avatarSize">角色大小：<output id="avatarSizeValue">128 px</output></label>
+        <input type="range" id="avatarSize" min="64" max="320" step="8" value="128">
+        <div class="help-text">儲存後套用到聊天頁面，也可移到角色上，拖曳方框角落調整。</div>
       </div>
 
       <div class="form-group">
@@ -285,11 +299,44 @@
       </div>
     </div>
 
+    <section class="section" aria-labelledby="pageFeaturesTitle" lang="zh-Hant">
+      <h2 class="section-title" id="pageFeaturesTitle">聊天頁面功能</h2>
+      <p class="help-text" style="margin-bottom: 16px;">選擇要開啟的功能，按「Save Settings」後會套用到已開啟的聊天頁面。這些開關與角色顯示分開設定。</p>
+      <div class="form-group">
+        <div class="checkbox-group"><input type="checkbox" id="questionOutline" checked><label for="questionOutline">問題導覽</label></div>
+        <p class="help-text">在對話左側顯示提問清單，點選可跳到原文。僅適用 ChatGPT。</p>
+      </div>
+      <div class="form-group">
+        <div class="checkbox-group"><input type="checkbox" id="conversationExport" checked><label for="conversationExport">下載全部對話</label></div>
+        <p class="help-text">顯示對話下載按鈕，可選 Markdown、HTML 或 PDF。</p>
+      </div>
+      <div class="form-group">
+        <div class="checkbox-group"><input type="checkbox" id="answerExport" checked><label for="answerExport">下載單則回答</label></div>
+        <p class="help-text">在每則回答的操作列顯示下載圖示。</p>
+      </div>
+      <div class="form-group">
+        <div class="checkbox-group"><input type="checkbox" id="historyDelete" checked><label for="historyDelete">依日期刪除對話</label></div>
+        <p class="help-text">在聊天紀錄旁顯示垃圾桶，可依日期篩選與刪除。僅適用 ChatGPT。</p>
+      </div>
+      <button type="button" class="btn-primary" id="saveFeaturesBtn">儲存並套用</button>
+      <p class="help-text" id="featuresStatus" role="status" aria-live="polite"></p>
+    </section>
+
     <div class="section">
       <h2 class="section-title">Custom Avatar Images</h2>
       <div class="help-text" style="margin-bottom: 15px;">
         Upload custom images for each emotion state. Supported formats: PNG, JPG, SVG, GIF. Leave empty to use default avatars.
       </div>
+
+      <div class="pack-actions" lang="zh-Hant">
+        <button type="button" class="btn-secondary" id="importPackBtn">一次匯入檔案</button>
+        <button type="button" class="btn-secondary" id="exportPackBtn">匯出目前表情包</button>
+        <button type="button" class="btn-secondary" id="clearAvatarsBtn">恢復原本角色</button>
+        <button type="button" class="btn-primary" id="savePackBtn">儲存並套用</button>
+        <input type="file" id="packFiles" accept=".json,image/png,image/jpeg,image/svg+xml,image/gif,image/webp" multiple hidden>
+      </div>
+      <p class="help-text">可選擇單一 .avatar-pack.json 表情包，或一次選取 idle.png、idle2.png、idle3.png、thinking.png、happy.png、sad.png、excited.png、confused.png、angry.png、surprised.png、worried.png、neutral.png。匯入會替換整組自訂表情，未提供的狀態使用原本角色。預覽確認後按「Save Settings」。</p>
+      <p id="importSummary" class="help-text" role="status" aria-live="polite"></p>
 
       <div class="avatar-grid" id="avatarGrid">
         <!-- Avatar items will be dynamically generated -->
@@ -335,7 +382,7 @@
       <button type="button" class="btn-secondary" id="resetBtn">Reset to Defaults</button>
     </div>
 
-    <div id="statusMessage" class="status-message"></div>
+    <div id="statusMessage" class="status-message" role="status" aria-live="polite"></div>
   </div>
 
   <script src="options.js" type="module"></script>

@@ -8,16 +8,27 @@ import { LlmAdapterFactory } from '@/adapters/LlmAdapterFactory';
 import type { IConfigService, ILlmAdapter } from '@/common/interfaces';
 import type { ExtensionMessage, AiResponse, EmotionAnalysis } from '@/common/types';
 import { MessageType, LlmProvider } from '@/common/types';
+import { OnboardingState } from './OnboardingState';
+
+// Register synchronously so a toolbar click also wakes a suspended service worker.
+chrome.action.onClicked.addListener(() => {
+  void chrome.runtime.openOptionsPage().catch(() => {
+    console.error('無法開啟角色設定，請從擴充功能詳細資料開啟選項。');
+  });
+});
 
 class BackgroundService {
   private configService: IConfigService;
   private llmAdapterFactory: LlmAdapterFactory;
   private currentAdapter: ILlmAdapter | null = null;
+  private onboarding = new OnboardingState();
+  private initialized: Promise<void>;
 
   constructor() {
     this.configService = new ConfigService();
     this.llmAdapterFactory = new LlmAdapterFactory();
-    this.initialize();
+    this.initialized = this.initialize();
+    chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
   }
 
   private async initialize(): Promise<void> {
@@ -36,9 +47,6 @@ class BackgroundService {
       });
     });
 
-    // Set up message listener
-    chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-
     console.log('AI Avatar Overlay Background: Initialized');
   }
 
@@ -55,6 +63,15 @@ class BackgroundService {
     sendResponse: (response?: unknown) => void
   ): boolean {
     switch (message.type) {
+      case MessageType.CLAIM_ONBOARDING:
+        this.onboarding.claim().then(show => sendResponse({ show }), () => sendResponse({ show: false }));
+        return true;
+      case MessageType.OPEN_OPTIONS:
+        chrome.runtime.openOptionsPage().then(
+          () => sendResponse({ success: true }),
+          () => sendResponse({ error: '無法開啟設定' })
+        );
+        return true;
       case MessageType.ANALYZE_EMOTION:
         this.handleEmotionAnalysis(message.payload as AiResponse, sendResponse);
         return true; // Keep channel open for async response
@@ -74,6 +91,9 @@ class BackgroundService {
     sendResponse: (response?: unknown) => void
   ): Promise<void> {
     try {
+      // The listener is registered synchronously, but the configured provider may
+      // still be loading when a cold service worker receives its first response.
+      await this.initialized;
       if (!this.currentAdapter || !this.currentAdapter.isConfigured()) {
         // No LLM configured, return default
         sendResponse({

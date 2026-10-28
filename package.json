@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "tsc --noEmit && node scripts/build.js",
+    "verify:build": "node scripts/verifyBuild.js",
     "build:old": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",

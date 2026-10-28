@@ -24,7 +24,7 @@ abstract class BaseSiteAdapter implements ISiteAdapter {
  */
 class ChatGptAdapter extends BaseSiteAdapter {
   public getResponseSelector(): string {
-    return '[data-message-author-role="assistant"]';
+    return '[data-message-author-role="assistant"], article[data-turn="assistant"]';
   }
 
   public getUserInputSelector(): string {
@@ -32,7 +32,7 @@ class ChatGptAdapter extends BaseSiteAdapter {
   }
 
   public isAiResponseElement(element: Element): boolean {
-    return element.getAttribute('data-message-author-role') === 'assistant';
+    return element.matches(this.getResponseSelector());
   }
 
   public extractTextFromElement(element: Element): string {

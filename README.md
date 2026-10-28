@@ -11,6 +11,9 @@ A Chrome extension that displays an animated avatar overlay on AI chat websites 
 - 🎯 **Clean Architecture**: Built with SOLID principles and design patterns
 - ✅ **Well-Tested**: Comprehensive unit tests with Vitest
 - 🎨 **Draggable UI**: Repositionable avatar overlay
+- 📑 **Chat Page Tools**: ChatGPT question navigation and date-based history cleanup; conversation/answer downloads in Markdown, HTML, or PDF. Gemini exports loaded messages; PDF uses browser print.
+- 🖼️ **Avatar Customization**: Saved position and size, corner resizing, expression-pack import, and image ZIP export
+- 💬 **First-use Guide**: Tips through the existing avatar and speech bubble; double-click the avatar to replay
 
 ## Architecture
 
@@ -123,6 +126,7 @@ Access the options page via the extension icon to configure:
 - **Avatar Style**: Choose between different avatar themes
 - **LLM Provider**: Select emotion analysis provider (None, Gemini, OpenAI)
 - **API Key**: Enter your LLM API key for emotion analysis
+- **Page Features**: Independently toggle question navigation, downloads, and history cleanup
 
 ## Architecture Principles
 

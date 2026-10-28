@@ -6,16 +6,12 @@
 import type { IResponseWatcher, ISiteAdapter } from '@/common/interfaces';
 import type { AiResponse } from '@/common/types';
 import { TargetSite } from '@/common/types';
-import { throttle } from '@/common/utils';
 
 export class ResponseWatcher implements IResponseWatcher {
   private observer: MutationObserver | null = null;
   private callbacks: Array<(response: AiResponse) => void> = [];
   private processedResponses = new Set<string>();
   private isRunning = false;
-  private pendingElements = new Map<Element, number>(); // Track elements and retry count
-  private recheckTimeout: NodeJS.Timeout | null = null;
-  private processedElements = new WeakSet<Element>(); // Track elements we've already given up on
   private responseCompletionTimers = new Map<Element, NodeJS.Timeout>(); // Track completion timers for each response
   private lastTextLength = new Map<Element, number>(); // Track last text length for each element
 
@@ -29,36 +25,23 @@ export class ResponseWatcher implements IResponseWatcher {
 
     console.log('👀 ResponseWatcher: Starting...');
 
-    // Mark existing responses FIRST before starting observer
-    // This prevents treating history as new responses
-    this.markExistingResponsesWithRetry(0, () => {
-      // Only start observer after marking is complete
-      this.observer = new MutationObserver(
-        throttle(this.handleMutations.bind(this), 300)
-      );
-
-      this.observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        characterData: true,      // Watch for text changes
-        characterDataOldValue: true,
-      });
-
-      this.isRunning = true;
-      console.log('✅ ResponseWatcher: Observer started and monitoring');
+    // Empty chats are normal: observe immediately and let message mutations wake us.
+    this.markExistingResponses();
+    this.observer = new MutationObserver(this.handleMutations.bind(this));
+    this.observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['data-message-author-role', 'data-turn', 'class'],
     });
+    this.isRunning = true;
+    console.log('✅ ResponseWatcher: Observer started and monitoring');
   }
 
-  private markExistingResponsesWithRetry(attempt: number = 0, onComplete?: () => void): void {
+  private markExistingResponses(): void {
     const selector = this.siteAdapter.getResponseSelector();
     const existingResponses = document.querySelectorAll(selector);
-
-    if (existingResponses.length === 0 && attempt < 10) {
-      // Retry after 2 seconds if no responses found (max 10 attempts = 20 seconds)
-      console.log(`⏳ No responses found yet, retrying in 2s (attempt ${attempt + 1}/10)...`);
-      setTimeout(() => this.markExistingResponsesWithRetry(attempt + 1, onComplete), 2000);
-      return;
-    }
 
     let lastResponseText: string | null = null;
     let processedCount = 0;
@@ -90,10 +73,6 @@ export class ResponseWatcher implements IResponseWatcher {
       this.notifyCallbacks(lastResponse);
     }
 
-    // Call completion callback
-    if (onComplete) {
-      onComplete();
-    }
   }
 
   public stop(): void {
@@ -115,28 +94,25 @@ export class ResponseWatcher implements IResponseWatcher {
   }
 
   private handleMutations(mutations: MutationRecord[]): void {
+    if (!this.isRunning) return;
     for (const mutation of mutations) {
+      // characterData includes comment markers as well as text. Only elements
+      // support the adapter's matches/closest checks.
+      const target = mutation.target.nodeType === Node.ELEMENT_NODE ? mutation.target as Element : mutation.target.parentElement;
+      if (target?.closest('[data-ai-avatar-ui]')) continue;
       // Handle new nodes being added
       if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
         this.checkForNewResponses(mutation.addedNodes);
       }
 
       // Handle text content changes (AI typing in existing element)
-      if (mutation.type === 'characterData' || mutation.type === 'childList') {
-        // Check if the mutation target or its parent is a response element
-        let element = mutation.target as Element;
-
-        // If target is a text node, get its parent element
-        if (element.nodeType === Node.TEXT_NODE) {
-          element = element.parentElement as Element;
-        }
-
-        if (element && this.siteAdapter.isAiResponseElement(element)) {
-          this.processResponseElement(element);
-        } else if (element) {
+      if (target && (mutation.type === 'characterData' || mutation.type === 'childList' || mutation.type === 'attributes')) {
+        if (this.siteAdapter.isAiResponseElement(target)) {
+          this.processResponseElement(target);
+        } else {
           // Check if any ancestor is a response element
           const selector = this.siteAdapter.getResponseSelector();
-          const responseElement = element.closest(selector);
+          const responseElement = target.closest(selector);
           if (responseElement) {
             this.processResponseElement(responseElement);
           }
@@ -164,38 +140,10 @@ export class ResponseWatcher implements IResponseWatcher {
   }
 
   private processResponseElement(element: Element): void {
+    if (!this.isRunning || !element.isConnected || element.closest('[data-ai-avatar-ui]')) return;
     const text = this.siteAdapter.extractTextFromElement(element);
-
-    // If text is empty or too short, add to pending and schedule recheck
-    if (!text || text.length < 3) {
-      // Skip if we've already given up on this element (empty text after retries)
-      if (this.processedElements.has(element)) {
-        return;
-      }
-
-      const retryCount = this.pendingElements.get(element) || 0;
-
-      // Max 3 retries to avoid infinite loop
-      if (retryCount < 3) {
-        this.pendingElements.set(element, retryCount + 1);
-        // Only log on first attempt to reduce noise
-        if (retryCount === 0) {
-          console.log(`⏳ Waiting for AI response text...`);
-        }
-        this.scheduleRecheck();
-      } else {
-        // Give up after 3 retries and mark as processed to avoid re-checking
-        this.pendingElements.delete(element);
-        this.processedElements.add(element);
-      }
-      return;
-    }
-
-    // If element has text, remove it from processedElements (allow new responses)
-    this.processedElements.delete(element);
-
-    // Remove from pending if it was there
-    this.pendingElements.delete(element);
+    // Empty placeholders will emit another mutation when their text arrives.
+    if (!text || text.length < 3 || this.processedResponses.has(this.hashText(text))) return;
 
     // Check if text is still changing (AI is still typing)
     const lastLength = this.lastTextLength.get(element) || 0;
@@ -214,6 +162,9 @@ export class ResponseWatcher implements IResponseWatcher {
       // Use shorter wait time (800ms) to be more responsive
       // This means: if text stops changing for 800ms, we consider it complete
       const completionTimer = setTimeout(() => {
+        if (!this.isRunning || !element.isConnected) {
+          this.responseCompletionTimers.delete(element); this.lastTextLength.delete(element); return;
+        }
         // Double-check the text length hasn't changed
         const finalText = this.siteAdapter.extractTextFromElement(element);
         const finalLength = finalText.length;
@@ -234,8 +185,8 @@ export class ResponseWatcher implements IResponseWatcher {
       return;
     }
 
-    // If we reach here, text hasn't changed - finalize immediately
-    this.finalizeResponse(element, text);
+    // Multiple mutation records may describe the same render; keep its debounce.
+    if (!this.responseCompletionTimers.has(element)) this.finalizeResponse(element, text);
   }
 
   private finalizeResponse(element: Element, text: string): void {
@@ -246,9 +197,6 @@ export class ResponseWatcher implements IResponseWatcher {
       this.responseCompletionTimers.delete(element);
     }
     this.lastTextLength.delete(element);
-
-    // Don't add to processedElements - we want to allow new responses in the same element
-    // processedElements is only for elements that never get text (to prevent infinite loops)
 
     // Create a hash of the text to track processed responses
     const textHash = this.hashText(text);
@@ -284,24 +232,6 @@ export class ResponseWatcher implements IResponseWatcher {
     });
 
     this.notifyCallbacks(response);
-  }
-
-  private scheduleRecheck(): void {
-    // Clear existing timeout
-    if (this.recheckTimeout) {
-      clearTimeout(this.recheckTimeout);
-    }
-
-    // Schedule recheck after 1.5 seconds
-    this.recheckTimeout = setTimeout(() => {
-      if (this.pendingElements.size > 0) {
-        const elements = Array.from(this.pendingElements.keys());
-        // Don't clear the map, let processResponseElement handle it
-        elements.forEach((el) => this.processResponseElement(el));
-      }
-      // Clear timeout reference
-      this.recheckTimeout = null;
-    }, 1500);
   }
 
   private hashText(text: string): string {
